@@ -7,12 +7,12 @@ def dynamics_rimless_wheel(t, state, params):
     gravity = params["gravity"]
     length = params["length"]
 
-    theta = state[0]
-    theta_dot = state[1]
+    angle = state[0]
+    angular_velocity = state[1]
 
-    acceleration = gravity/length * np.sin(theta)  # Simplified model for a rimless wheel
+    acceleration = gravity/length * np.sin(angle)  # Simplified model for a rimless wheel
 
-    state_derivative = np.array([theta_dot, acceleration])
+    state_derivative = np.array([angular_velocity, acceleration])
     return state_derivative
 
 
@@ -20,24 +20,24 @@ def apply_impact(state, params):
     """Check for impact within a timestep while the rimless wheel is 
     rolling either forward (next spoke) or backward (previous spoke), 
     as well as apply new angular velocity and shift coordinates if necessary."""
-    theta = state[0]
-    theta_dot = state[1]
-    alpha = np.pi / params["number_of_spokes"]
-    gamma = params["gamma"]
+    angle = state[0]
+    angular_velocity = state[1]
+    half_spoke_angle = np.pi / params["number_of_spokes"]
+    downhill_incline = params["gamma"]
 
     # Impact-event guard: next spoke has reached the ground 
     # (forward rolling impact)
-    if theta >= (gamma + alpha) and theta_dot > 0:
-        new_theta_dot = theta_dot * np.cos(2 * alpha)
-        new_theta = gamma - alpha
-        return np.array([new_theta, new_theta_dot]), True
+    if angle >= (downhill_incline + half_spoke_angle) and angular_velocity > 0:
+        new_angular_velocity = angular_velocity * np.cos(2 * half_spoke_angle)
+        new_angle = downhill_incline - half_spoke_angle
+        return np.array([new_angle, new_angular_velocity]), True
     
     # Impact-event guard: previous spoke has reached the ground 
     # (backward rolling impact)
-    elif theta <= (gamma - alpha) and theta_dot < 0:
-        new_theta_dot = theta_dot * np.cos(2 * alpha)
-        new_theta = gamma + alpha
-        return np.array([new_theta, new_theta_dot]), True
+    elif angle <= (downhill_incline - half_spoke_angle) and angular_velocity < 0:
+        new_angular_velocity = angular_velocity * np.cos(2 * half_spoke_angle)
+        new_angle = downhill_incline + half_spoke_angle
+        return np.array([new_angle, new_angular_velocity]), True
     
     else:
         return state, False
@@ -48,32 +48,32 @@ def integrate_with_impact(state, t, timestep, params):
     for impact events. If an impact is detected, the time of the impact is 
     refined using a bisection procedure. The post-impact state, impact time, 
     and a flag indicating whether an impact occurred are returned."""
-    gamma = params["gamma"]
-    alpha = np.pi / params["number_of_spokes"]
+    downhill_incline = params["gamma"]
+    half_spoke_angle = np.pi / params["number_of_spokes"]
 
     old_state = state.copy()
     trial_state = rk4(old_state, timestep, dynamics_rimless_wheel, t, params)
 
     # Extract the old and trial angles for impact detection.
-    old_theta = old_state[0]
-    new_theta = trial_state[0]
-    new_theta_dot = trial_state[1]
+    old_angle = old_state[0]
+    new_angle = trial_state[0]
+    new_angular_velocity = trial_state[1]
 
     # Determine if a forward or backward impact occurred
-    forward_impact = (old_theta < (gamma + alpha)
-        and new_theta >= (gamma + alpha) and new_theta_dot > 0)
+    forward_impact = (old_angle < (downhill_incline + half_spoke_angle)
+        and new_angle >= (downhill_incline + half_spoke_angle) and new_angular_velocity > 0)
 
-    backward_impact = (old_theta > (gamma - alpha) 
-        and new_theta <= (gamma - alpha) and new_theta_dot < 0)
+    backward_impact = (old_angle > (downhill_incline - half_spoke_angle) 
+        and new_angle <= (downhill_incline - half_spoke_angle) and new_angular_velocity < 0)
 
     # If no impact occurred, return the trial state as the new state
     if not (forward_impact or backward_impact):
         return trial_state, None, False, None
 
     if forward_impact:
-        event_guard = gamma + alpha
+        event_guard = downhill_incline + half_spoke_angle
     else:
-        event_guard = gamma - alpha
+        event_guard = downhill_incline - half_spoke_angle
 
     # Bisection bounds for impact time
     impact_time_lower = 0.0
@@ -84,16 +84,16 @@ def integrate_with_impact(state, t, timestep, params):
         impact_time_midpoint = 0.5 * (impact_time_lower + impact_time_upper)
         midpoint_state = rk4(old_state, impact_time_midpoint, 
             dynamics_rimless_wheel, t, params)
-        midpoint_theta = midpoint_state[0]
+        midpoint_angle = midpoint_state[0]
 
         # Check if the midpoint state has crossed the impact event guard
         if forward_impact:
-            if midpoint_theta >= event_guard:
+            if midpoint_angle >= event_guard:
                 impact_time_upper = impact_time_midpoint
             else:
                 impact_time_lower = impact_time_midpoint
         else:
-            if midpoint_theta <= event_guard:
+            if midpoint_angle <= event_guard:
                 impact_time_upper = impact_time_midpoint
             else:
                 impact_time_lower = impact_time_midpoint
@@ -129,11 +129,11 @@ def calculate_energy(state, params):
     mass = params["mass"]
     length = params["length"]
 
-    theta = state[0]  # indexes entire row "vectorized" if state is (2, N)
-    theta_dot = state[1]
+    angle = state[0]  # indexes entire row "vectorized" if state is (2, N)
+    angular_velocity = state[1]
 
-    kinetic_energy = 0.5 * mass * (length ** 2) * (theta_dot ** 2)
-    potential_energy = mass * gravity * length * np.cos(theta)
+    kinetic_energy = 0.5 * mass * (length ** 2) * (angular_velocity ** 2)
+    potential_energy = mass * gravity * length * np.cos(angle)
 
     return kinetic_energy, potential_energy
 
@@ -142,23 +142,21 @@ def find_steady_state_velocity(params):
     """Return pre- and post-impact steady-state angular velocities."""
     gravity = params["gravity"]
     length = params["length"]
-    gamma = params["gamma"]
-    alpha = np.pi / params["number_of_spokes"]
+    downhill_incline = params["gamma"]
+    half_spoke_angle = np.pi / params["number_of_spokes"]
 
-    # Pre-impact steady state angular velocity from energy balance derivation
-    theta_dot_minus_steady = np.sqrt((2 * gravity * (np.cos(gamma - 
-        alpha) - np.cos(gamma + alpha))) / (length * 
-        (np.sin(2 * alpha) ** 2)))
-    # Post-impact steady state angular velocity
-    theta_dot_plus_steady = theta_dot_minus_steady * (
-        np.cos(2 * alpha))
+    pre_impact_angular_velocity = np.sqrt((2 * gravity * (np.cos(downhill_incline - 
+        half_spoke_angle) - np.cos(downhill_incline + half_spoke_angle))) / (length * 
+        (np.sin(2 * half_spoke_angle) ** 2)))
+    post_impact_angular_velocity = pre_impact_angular_velocity * (
+        np.cos(2 * half_spoke_angle))
 
-    return theta_dot_minus_steady, theta_dot_plus_steady
+    return pre_impact_angular_velocity, post_impact_angular_velocity
 
 
 def classify_attractor(initial_state, params, timestep, sim_time,
                        min_impacts, steady_velocity_tolerance,
-                       rest_velocity_tolerance, theta_dot_plus_steady):
+                       rest_velocity_tolerance, post_impact_angular_velocity):
     """Classify the attractor type for the rimless wheel given an initial state.
     Attractor type:
         0 = unclassified
@@ -184,8 +182,8 @@ def classify_attractor(initial_state, params, timestep, sim_time,
             # Check for attractor 1 or "rest" by seeing if the recent impact 
             # velocities are close to zero
             if len(impact_velocities) >= min_impacts:
-                recent = np.asarray(impact_velocities[-min_impacts:])
-                max_recent_velocity = np.max(np.abs(recent))
+                recent_impact_velocities = np.asarray(impact_velocities[-min_impacts:])
+                max_recent_velocity = np.max(np.abs(recent_impact_velocities))
                 if max_recent_velocity < rest_velocity_tolerance:
                     return 1
 
@@ -197,7 +195,7 @@ def classify_attractor(initial_state, params, timestep, sim_time,
                 recent = np.asarray(impact_velocities[-min_impacts:])
                 all_positive = np.all(recent > 0)
                 fixed_point_error = np.max(np.abs(recent - 
-                    theta_dot_plus_steady))
+                    post_impact_angular_velocity))
                 impact_spread = (np.max(recent) - np.min(recent))
                 if (all_positive and fixed_point_error < 
                     steady_velocity_tolerance and impact_spread
@@ -214,7 +212,7 @@ def classify_attractor(initial_state, params, timestep, sim_time,
     if (len(impact_velocities) >= min_impacts):
         recent = np.asarray(impact_velocities[-min_impacts:])
         fixed_point_error = np.max(np.abs(recent - 
-            theta_dot_plus_steady))
+            post_impact_angular_velocity))
         impact_spread = (np.max(recent) - np.min(recent))
         if (np.all(recent > 0) and fixed_point_error 
             < steady_velocity_tolerance and impact_spread 
@@ -223,13 +221,13 @@ def classify_attractor(initial_state, params, timestep, sim_time,
     return 0
 
 
-def find_limit_cycle(params, timestep, theta_dot_plus_steady, 
-                     theta_dot_minus_steady):
+def find_limit_cycle(params, timestep, post_impact_angular_velocity, 
+                     pre_impact_angular_velocity):
     """Compute limit cycle while the rimless wheel enters steady state rolling."""
-    gamma = params["gamma"]
-    alpha = np.pi / params["number_of_spokes"]
+    downhill_incline = params["gamma"]
+    half_spoke_angle = np.pi / params["number_of_spokes"]
 
-    state = np.array([gamma - alpha, theta_dot_plus_steady])
+    state = np.array([downhill_incline - half_spoke_angle, post_impact_angular_velocity])
     trajectory = [state.copy()]
     times = [0.0]
     t = 0.0
@@ -241,10 +239,10 @@ def find_limit_cycle(params, timestep, theta_dot_plus_steady,
         t = t + timestep
         
         if did_impact:
-            # If an impact occurred, append the pre-impact state at the boundary (gamma + alpha)
+            # If an impact occurred, append the pre-impact state at the boundary (downhill_incline + half_spoke_angle)
             # and break before the coordinate reset takes effect
-            trajectory.append(np.array([gamma + alpha, state[1] / (
-                np.cos(2 * alpha))]))
+            trajectory.append(np.array([downhill_incline + half_spoke_angle, state[1] / (
+                np.cos(2 * half_spoke_angle))]))
             break
         else:
             trajectory.append(state.copy())
@@ -252,23 +250,23 @@ def find_limit_cycle(params, timestep, theta_dot_plus_steady,
         times.append(t)
 
     trajectory = np.asarray(trajectory)
-    return (trajectory[:, 0], trajectory[:, 1], theta_dot_plus_steady,
-        theta_dot_minus_steady)
+    return (trajectory[:, 0], trajectory[:, 1], post_impact_angular_velocity,
+        pre_impact_angular_velocity)
 
 
-def calculate_roa(params, theta_dot_min, theta_dot_max,
+def calculate_roa(params, angular_velocity_min, angular_velocity_max,
                   num_grid, roa_timestep, roa_sim_time):
     """Calculate the RoA grid for a given parameter set."""
-    gamma = params["gamma"]
-    alpha = np.pi / params["number_of_spokes"]
+    downhill_incline = params["gamma"]
+    half_spoke_angle = np.pi / params["number_of_spokes"]
 
-    theta_dot_minus_steady, theta_dot_plus_steady = ( 
+    pre_impact_angular_velocity, post_impact_angular_velocity = ( 
         find_steady_state_velocity(params))
 
-    theta_values = np.linspace(gamma - alpha, gamma + alpha, num_grid)
-    theta_dot_values = np.linspace(theta_dot_min, theta_dot_max,
+    angle_values = np.linspace(downhill_incline - half_spoke_angle, downhill_incline + half_spoke_angle, num_grid)
+    angular_velocity_values = np.linspace(angular_velocity_min, angular_velocity_max,
                                    num_grid)
-    Angle, Angular_Velocity = np.meshgrid(theta_values, theta_dot_values)
+    Angle, Angular_Velocity = np.meshgrid(angle_values, angular_velocity_values)
 
     roa = np.zeros(Angle.shape, dtype=int)
 
@@ -280,24 +278,24 @@ def calculate_roa(params, theta_dot_min, theta_dot_max,
                 roa_timestep, roa_sim_time, min_impacts=5,
                 steady_velocity_tolerance=3e-3, 
                 rest_velocity_tolerance=3e-3, 
-                theta_dot_plus_steady=theta_dot_plus_steady)
+                post_impact_angular_velocity=post_impact_angular_velocity)
             # Progress information
             completed = i + 1
             percentage = (completed / Angle.shape[0]) * 100
             print(f"RoA Progress: {percentage:.2f}% completed", end="\r")
 
-    return theta_values, theta_dot_values, roa
+    return angle_values, angular_velocity_values, roa
 
 
-def simulate_one_step_from_section(theta_dot, params, timestep):
+def simulate_one_step_from_section(angular_velocity, params, timestep):
     """Start immediately after an impact and simulate until the
     next impact.  Return the post-impact angular velocity there.
     """
-    alpha = np.pi / params["number_of_spokes"]
-    gamma = params["gamma"]
+    half_spoke_angle = np.pi / params["number_of_spokes"]
+    downhill_incline = params["gamma"]
 
-    # Immediately after a forward impact, theta = gamma - alpha
-    state = np.array([gamma - alpha, theta_dot])
+    # Immediately after a forward impact, theta = downhill_incline - half_spoke_angle
+    state = np.array([downhill_incline - half_spoke_angle, angular_velocity])
     t = 0.0
 
     # Simulate until the next impact
@@ -313,29 +311,29 @@ def simulate_one_step_from_section(theta_dot, params, timestep):
 
 def calculate_floquet_multiplier(params, timestep, delta):
     """Calculate the Floquet multiplier from Poincare section."""
-    theta_dot_minus_steady, theta_dot_plus_steady = (
+    pre_impact_angular_velocity, post_impact_angular_velocity = (
         find_steady_state_velocity(params))
 
-    theta_dot_minus = theta_dot_plus_steady - delta
-    theta_dot_plus = theta_dot_plus_steady + delta
+    angular_velocity_minus = post_impact_angular_velocity - delta
+    angular_velocity_plus = post_impact_angular_velocity + delta
 
-    P_minus = simulate_one_step_from_section(
-        theta_dot_minus, params, timestep)
-    P_plus = simulate_one_step_from_section(
-        theta_dot_plus, params, timestep)
+    poincare_map_minus = simulate_one_step_from_section(
+        angular_velocity_minus, params, timestep)
+    poincare_map_plus = simulate_one_step_from_section(
+        angular_velocity_plus, params, timestep)
 
     # Approximate the derivative of the Poincare map at the fixed point 
     # using a finite difference
-    floquet_multiplier = (P_plus - P_minus) / (2 * delta)
+    floquet_multiplier = (poincare_map_plus - poincare_map_minus) / (2 * delta)
 
-    return floquet_multiplier, P_minus, P_plus
+    return floquet_multiplier, poincare_map_minus, poincare_map_plus
 
 
 def calculate_floquet_multiplier_sweep(params, timestep, deltas):
     """Calculate Floquet multipliers across an array of delta values."""
     floquet_values = []
     for i, delta in enumerate(deltas):
-        floquet_multiplier, P_minus, P_plus = (
+        floquet_multiplier, poincare_map_minus, poincare_map_plus = (
             calculate_floquet_multiplier(params, timestep, delta))
         floquet_values.append(floquet_multiplier)
 
@@ -346,62 +344,63 @@ def calculate_floquet_multiplier_sweep(params, timestep, deltas):
     return np.array(floquet_values)
 
 
-def calculate_inclination_sweep(params, gamma_values, timestep,
+def calculate_inclination_sweep(params, downhill_incline_values, timestep,
                                 roa_timestep, roa_sim_time, 
-                                theta_dot_min, theta_dot_max, 
-                                num_grid, gamma_roa_values=None):
+                                angular_velocity_min, angular_velocity_max, 
+                                num_grid, downhill_incline_roa_values=None):
     """Calculate Floquet multipliers and RoA fractions 
     across inclinations."""
 
-    gamma_values = np.asarray(gamma_values)
-    if gamma_roa_values is None:
-        gamma_roa_values = []
+    downhill_incline_values = np.asarray(downhill_incline_values)
+    if downhill_incline_roa_values is None:
+        downhill_incline_roa_values = []
 
-    gamma_floquet = []
-    gamma_rolling_fraction = []
-    gamma_rest_fraction = []
-    roa_gamma_results = {}
+    downhill_incline_floquet = []
+    downhill_incline_rolling_fraction = []
+    downhill_incline_rest_fraction = []
+    roa_downhill_incline_results = {}
 
     # Loop over each inclination value to compute Floquet multipliers 
     # and RoA fractions
-    for i, gamma_value in enumerate(gamma_values):
+    for i, downhill_incline_value in enumerate(downhill_incline_values):
         sweep_params = params.copy()
-        sweep_params["gamma"] = gamma_value
+        sweep_params["gamma"] = downhill_incline_value
         # Calculate Floquet multiplier
-        floquet_multiplier, P_minus, P_plus = (
+        floquet_multiplier, poincare_map_minus, poincare_map_plus = (
             calculate_floquet_multiplier(sweep_params, timestep=timestep,
             delta=1e-5))
-        gamma_floquet.append(floquet_multiplier)
+        downhill_incline_floquet.append(floquet_multiplier)
 
         # Calculate RoA
-        theta_values, theta_dot_values, roa_grid = calculate_roa(
-            sweep_params, theta_dot_min=theta_dot_min, 
-            theta_dot_max=theta_dot_max, num_grid=num_grid, 
+        angle_values, angular_velocity_values, roa_grid = calculate_roa(
+            sweep_params, angular_velocity_min=angular_velocity_min, 
+            angular_velocity_max=angular_velocity_max, num_grid=num_grid, 
             roa_timestep=roa_timestep, roa_sim_time=roa_sim_time)
 
-        print(f"\nInclination {i + 1}/{len(gamma_values)} "
-        f"completed: gamma = {gamma_value:.3f}")
+        print(f"\nInclination {i + 1}/{len(downhill_incline_values)} "
+        f"completed: gamma = {downhill_incline_value:.3f}")
 
         total_points = roa_grid.size
 
         rolling_fraction = np.sum(roa_grid == 2) / total_points
         rest_fraction = np.sum(roa_grid == 1) / total_points
 
-        gamma_rolling_fraction.append(rolling_fraction)
-        gamma_rest_fraction.append(rest_fraction)
+        downhill_incline_rolling_fraction.append(rolling_fraction)
+        downhill_incline_rest_fraction.append(rest_fraction)
 
         # Store selected RoA grids
-        if gamma_value in gamma_roa_values:
-            roa_gamma_results[gamma_value] = (theta_values,
-                theta_dot_values, roa_grid)
+        if downhill_incline_value in downhill_incline_roa_values:
+            roa_downhill_incline_results[downhill_incline_value] = (angle_values,
+                angular_velocity_values, roa_grid)
 
-    return (np.asarray(gamma_floquet), np.asarray(gamma_rolling_fraction),
-        np.asarray(gamma_rest_fraction), roa_gamma_results)
+    return (np.asarray(downhill_incline_floquet), np.asarray(downhill_incline_rolling_fraction),
+        np.asarray(downhill_incline_rest_fraction), roa_downhill_incline_results)
 
 
 def calculate_spoke_sweep(params, spoke_values, timestep,
-                          roa_timestep, roa_sim_time, theta_dot_min, theta_dot_max, num_grid,
-                          spoke_roa_values=None):
+                          roa_timestep, roa_sim_time, 
+                          angular_velocity_min, angular_velocity_max, 
+                          num_grid, spoke_roa_values=None):
     """Calculate Floquet multipliers and RoA fractions 
     across spoke angles."""
 
@@ -426,9 +425,9 @@ def calculate_spoke_sweep(params, spoke_values, timestep,
         spoke_floquet.append(floquet_multiplier)
 
         # Calculate RoA
-        theta_values, theta_dot_values, roa_grid = calculate_roa(
-            sweep_params, theta_dot_min=theta_dot_min, 
-            theta_dot_max=theta_dot_max, num_grid=num_grid, 
+        angle_values, angular_velocity_values, roa_grid = calculate_roa(
+            sweep_params, angular_velocity_min=angular_velocity_min, 
+            angular_velocity_max=angular_velocity_max, num_grid=num_grid, 
             roa_timestep=roa_timestep, roa_sim_time=roa_sim_time)
 
         print(f"\nSpoke {i + 1}/{len(spoke_values)} "
@@ -444,8 +443,8 @@ def calculate_spoke_sweep(params, spoke_values, timestep,
 
         # Store selected RoA grids
         if spoke_value in spoke_roa_values:
-            roa_spoke_results[spoke_value] = (theta_values,
-                theta_dot_values, roa_grid)
+            roa_spoke_results[spoke_value] = (angle_values,
+                angular_velocity_values, roa_grid)
 
     return (np.asarray(spoke_floquet), np.asarray(spoke_rolling_fraction),
         np.asarray(spoke_rest_fraction), roa_spoke_results)

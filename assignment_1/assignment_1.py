@@ -11,7 +11,7 @@ from integrators import rk4
 
 params = {
     "gravity": 9.81,  # gravity (m/s^2)
-    "mass": 1.0,  # mass of ball (kg)
+    "mass": 1.0,  # mass of rimless wheel (kg)
     "length": 1.0,  # spoke length (m)
     "number_of_spokes": 8,  # number of spokes
     "gamma": 0.08,  # downhill inclination of the ground (rad)
@@ -19,8 +19,8 @@ params = {
 gravity = params["gravity"]
 mass = params["mass"]
 length = params["length"]
-gamma = params["gamma"]
-alpha = np.pi / params["number_of_spokes"]
+downhill_incline = params["gamma"]
+half_spoke_angle = np.pi / params["number_of_spokes"]
 
 # Set-up
 initial_state = np.array([0.2, 2])
@@ -30,15 +30,14 @@ sim_time = 5.0
 
 # Initial condition must be between gamma - alpha and gamma + alpha to ensure 
 # the rimless wheel starts within a single spoke-to-spoke step
-if initial_state[0] >= params["gamma"] + alpha or (
-    initial_state[0] <= params["gamma"] - alpha):
+if initial_state[0] >= params["gamma"] + half_spoke_angle or (
+    initial_state[0] <= params["gamma"] - half_spoke_angle):
     raise ValueError(
         f"Starting theta is out of bounds. "
-        f"Choose an angle between {params['gamma'] - alpha:.3f} rad "
-        f"and {params['gamma'] + alpha:.3f} rad.")
+        f"Choose an angle between {params['gamma'] - half_spoke_angle:.3f} rad "
+        f"and {params['gamma'] + half_spoke_angle:.3f} rad.")
 
-# Pre- and Post-impact steady state angular velocity 
-theta_dot_minus_steady, theta_dot_plus_steady = (
+pre_impact_angular_velocity, post_impact_angular_velocity = (
     model.find_steady_state_velocity(params))
 
 def simulate_rimless_wheel(timestep, sim_time, initial_state, params):
@@ -89,12 +88,12 @@ plt.xlabel(r"Angle $\theta$ (rad)")
 plt.ylabel(r"Angular velocity "
            r"$\dot{\theta}$ (rad/s)")
 plt.title(f"Rimless Wheel Phase Portrait (dt = {timestep:.5f})")
-plt.axvline(gamma - alpha, color="gray", linestyle="--", 
+plt.axvline(downhill_incline - half_spoke_angle, color="gray", linestyle="--", 
             label="Impact boundaries")
-plt.axvline(gamma + alpha, color="gray", linestyle="--")
-plt.text(gamma - alpha, 0.5, r"$\gamma-\alpha$", color="gray", 
+plt.axvline(downhill_incline + half_spoke_angle, color="gray", linestyle="--")
+plt.text(downhill_incline - half_spoke_angle, 0.5, r"$\gamma-\alpha$", color="gray", 
          ha="left", va="top")
-plt.text(gamma + alpha, 0.5, r"$\gamma+\alpha$", color="gray",
+plt.text(downhill_incline + half_spoke_angle, 0.5, r"$\gamma+\alpha$", color="gray",
          ha="right", va="top")
 plt.axhline(0, color="black", linewidth=0.8)
 plt.grid(True, linestyle=":", alpha=0.5)
@@ -106,35 +105,35 @@ plt.show()
 num_grid = 51
 roa_timestep = 5e-4 
 roa_sim_time = 20.0
-theta_dot_min = -0.6
-theta_dot_max = 1.8
+angular_velocity_min = -0.6
+angular_velocity_max = 1.8
 
-theta_values, theta_dot_values, roa = model.calculate_roa(params,
-    theta_dot_min=theta_dot_min, theta_dot_max=theta_dot_max, 
+angle_values, angular_velocity_values, roa = model.calculate_roa(params,
+    angular_velocity_min=angular_velocity_min, angular_velocity_max=angular_velocity_max, 
     num_grid=num_grid, roa_timestep=roa_timestep, 
     roa_sim_time=roa_sim_time)
 
-Angle, Angular_Velocity = np.meshgrid(theta_values, theta_dot_values)
+angle_matrix, angular_velocity_matrix = np.meshgrid(angle_values, angular_velocity_values)
 roa_cmap = ListedColormap([
     "lightgray",    # 0 = unclassified
     "royalblue",    # 1 = rest
     "darkorange",   # 2 = rolling
     ])
 plt.figure(figsize=(9, 6))
-plt.contourf(Angle, Angular_Velocity, roa, levels=[-0.5, 0.5, 1.5, 2.5],
-              cmap=roa_cmap)
+plt.contourf(angle_matrix, angular_velocity_matrix, roa, 
+             levels=[-0.5, 0.5, 1.5, 2.5], cmap=roa_cmap)
 # Calculate limit cycle
-theta, theta_dot, theta_dot_plus_steady, theta_dot_minus_steady = (
-    model.find_limit_cycle(params, roa_timestep, theta_dot_plus_steady,
-                            theta_dot_minus_steady))
+angle, angular_velocity, post_impact_angular_velocity, pre_impact_angular_velocity = (
+    model.find_limit_cycle(params, roa_timestep, post_impact_angular_velocity,
+    pre_impact_angular_velocity))
 # Overlay limit cycle
-plt.plot(theta, theta_dot, color="black", linewidth=2.5, 
+plt.plot(angle, angular_velocity, color="black", linewidth=2.5, 
          label="Limit cycle")
 plt.xlabel(r"Initial angle $\theta_0$ (rad)")
 plt.ylabel(r"Initial angular velocity "
             r"$\dot{\theta}_0$ (rad/s)")
 plt.title(f"Regions of Attraction for Rimless Wheel: "
-          f"$\\gamma = {gamma:.3f}$, "f"$\\alpha = {alpha:.3f}$")
+          f"$\\gamma = {downhill_incline:.3f}$, "f"$\\alpha = {half_spoke_angle:.3f}$")
 legend_elements = [Patch(label="Rest", color="royalblue"), 
                    Patch(label="Steady State", color="darkorange"),
                    Patch(label="Unclassified", color="lightgray"),
@@ -147,24 +146,38 @@ plt.show()
 # Plot Poincare section/one-dimensional step-to-step return map
 # post_impact_velocities[k] = angular velocity immediately
 # after the kth spoke contact
-theta_dot_k = post_impact_velocities[:-1]
-theta_dot_next = post_impact_velocities[1:]
+angular_velocity_k = post_impact_velocities[:-1]
+angular_velocity_next = post_impact_velocities[1:]
+
+return_map_velocity_min = min(np.min(angular_velocity_k), post_impact_angular_velocity) - 0.1
+return_map_velocity_max = max(np.max(angular_velocity_k), post_impact_angular_velocity) + 0.1
+angular_velocity_range = np.linspace(return_map_velocity_min, return_map_velocity_max, 60)
+return_map_curve = np.array([
+    model.simulate_one_step_from_section(v, params, roa_timestep)
+    for v in angular_velocity_range])
 
 plt.figure(figsize=(7, 6))
-# Return map data
-plt.plot(theta_dot_k, theta_dot_next, "o-", color="darkorange",
-         markersize=5, linewidth=1, label="Return map")
+plt.plot(angular_velocity_range, return_map_curve, "-", color="darkorange",
+         linewidth=2, label="Return map")
+
+# Shows the simulated trajectory iterating toward the
+# fixed point where the return map meets the identity line
+for k in range(len(angular_velocity_k) - 1):
+    plt.plot([angular_velocity_k[k], angular_velocity_k[k]],
+              [angular_velocity_k[k], angular_velocity_next[k]],
+              color="gray", linewidth=0.8)
+    plt.plot([angular_velocity_k[k], angular_velocity_next[k]],
+              [angular_velocity_next[k], angular_velocity_next[k]],
+              color="gray", linewidth=0.8)
+plt.plot(angular_velocity_k, angular_velocity_next, "o", color="darkorange",
+         markersize=5, label="Simulated crossings")
 
 # Identity line: theta_dot_{k+1} = theta_dot_k
-theta_dot_min = min(np.min(theta_dot_k), np.min(theta_dot_next))
-theta_dot_max = max(np.max(theta_dot_k), np.max(theta_dot_next))
-theta_dot_range = np.linspace(theta_dot_min, theta_dot_max, 200)
-
-plt.plot(theta_dot_range, theta_dot_range, "k--",
+plt.plot(angular_velocity_range, angular_velocity_range, "k--",
          linewidth=1.5, label=r"Identity: $\dot{\theta}_{k+1}=\dot{\theta}_k$")
-plt.plot(theta_dot_plus_steady, theta_dot_plus_steady,
+plt.plot(post_impact_angular_velocity, post_impact_angular_velocity,
          "ro", markersize=9,
-         label=fr"Theoretical fixed point = {theta_dot_plus_steady:.3f}")
+         label=fr"Theoretical fixed point = {post_impact_angular_velocity:.3f}")
 plt.xlabel(r"Angular velocity at crossing $k$, $\dot{\theta}_k^+$ (rad/s)")
 plt.ylabel(r"Angular velocity at crossing $k+1$, $\dot{\theta}_{k+1}^+$ (rad/s)")
 plt.title("Step-to-Step Poincare Return Map")
@@ -192,20 +205,20 @@ plt.tight_layout()
 plt.show()
 
 # Sweep the inclinations (gamma)
-gamma_values = np.array([0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.14, 
-                         0.16, 0.18, 0.20])
-gamma_roa_values = gamma_values
+downhill_incline_values = np.array([0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.14, 
+                                    0.16, 0.18, 0.20])
+downhill_incline_roa_values = downhill_incline_values
 
-(gamma_floquet, gamma_rolling_fraction, gamma_rest_fraction, 
-    roa_gamma_results) = model.calculate_inclination_sweep(params,
-    gamma_values, timestep=1e-5, roa_timestep=roa_timestep,
-    roa_sim_time=roa_sim_time, theta_dot_min=theta_dot_min,
-    theta_dot_max=theta_dot_max, num_grid=num_grid,
-    gamma_roa_values=gamma_roa_values)
+(downhill_incline_floquet, downhill_incline_rolling_fraction, downhill_incline_rest_fraction, 
+    roa_downhill_incline_results) = model.calculate_inclination_sweep(params,
+    downhill_incline_values, timestep=1e-5, roa_timestep=roa_timestep,
+    roa_sim_time=roa_sim_time, angular_velocity_min=angular_velocity_min,
+    angular_velocity_max=angular_velocity_max, num_grid=num_grid,
+    downhill_incline_roa_values=downhill_incline_roa_values)
     
 # Plot Floquet multiplier vs inclination
 plt.figure(figsize=(8, 5))
-plt.plot(gamma_values, gamma_floquet, "o-", color="darkorange",
+plt.plot(downhill_incline_values, downhill_incline_floquet, "o-", color="darkorange",
          linewidth=2, markersize=6)
 plt.axhline(1, color="black", linestyle="--", linewidth=1,
             label=r"$\lambda=1$")
@@ -222,9 +235,9 @@ plt.show()
 
 # Plot RoA fractions vs inclination
 plt.figure(figsize=(8, 5))
-plt.plot(gamma_values, gamma_rolling_fraction, "o-", color="darkorange",
+plt.plot(downhill_incline_values, downhill_incline_rolling_fraction, "o-", color="darkorange",
     label="Steady rolling")
-plt.plot(gamma_values, gamma_rest_fraction, "s-", color="royalblue",
+plt.plot(downhill_incline_values, downhill_incline_rest_fraction, "s-", color="royalblue",
           label="Rest")
 plt.xlabel(r"Inclination $\gamma$ (rad)")
 plt.ylabel("Fraction of RoA grid")
@@ -241,8 +254,8 @@ spoke_roa_values = spoke_values
 (spoke_floquet, spoke_rolling_fraction, spoke_rest_fraction, 
     roa_spoke_results) = (model.calculate_spoke_sweep(params, 
     spoke_values, timestep=timestep, roa_timestep=roa_timestep, 
-    roa_sim_time=roa_sim_time, theta_dot_min=theta_dot_min,
-    theta_dot_max=theta_dot_max, num_grid=51,
+    roa_sim_time=roa_sim_time, angular_velocity_min=angular_velocity_min,
+    angular_velocity_max=angular_velocity_max, num_grid=51,
     spoke_roa_values=spoke_roa_values))
 
 # Plot Floquet multiplier vs spoke count
