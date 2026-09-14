@@ -207,7 +207,8 @@ plt.show()
 # Sweep the inclinations (gamma)
 downhill_incline_values = np.array([0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.14, 
                                     0.16, 0.18, 0.20])
-downhill_incline_roa_values = downhill_incline_values
+downhill_incline_roa_values = np.array(
+    [downhill_incline_values.min(), downhill_incline_values.max()])
 
 (downhill_incline_floquet, downhill_incline_rolling_fraction, downhill_incline_rest_fraction, 
     roa_downhill_incline_results) = model.calculate_inclination_sweep(params,
@@ -247,9 +248,26 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
+# Plot RoA phase portraits for the smallest and largest inclinations
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+for ax, downhill_incline_value in zip(axes, downhill_incline_roa_values):
+    angle_values, angular_velocity_values, roa_grid = (
+        roa_downhill_incline_results[downhill_incline_value])
+    angle_matrix, angular_velocity_matrix = np.meshgrid(angle_values, angular_velocity_values)
+    ax.contourf(angle_matrix, angular_velocity_matrix, roa_grid,
+                levels=[-0.5, 0.5, 1.5, 2.5], cmap=roa_cmap)
+    ax.set_xlabel(r"Initial angle $\theta_0$ (rad)")
+    ax.set_title(fr"$\gamma = {downhill_incline_value:.3f}$")
+    ax.grid(True, linestyle=":", alpha=0.4)
+axes[0].set_ylabel(r"Initial angular velocity $\dot{\theta}_0$ (rad/s)")
+fig.suptitle("Regions of Attraction: Smallest vs. Largest Inclination")
+fig.legend(handles=legend_elements, loc="lower center", ncol=4)
+plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+plt.show()
+
 # Sweep number of spokes
 spoke_values = np.array([6, 7, 8, 9, 10, 11, 12])
-spoke_roa_values = spoke_values
+spoke_roa_values = np.array([spoke_values.min(), spoke_values.max()])
 
 (spoke_floquet, spoke_rolling_fraction, spoke_rest_fraction, 
     roa_spoke_results) = (model.calculate_spoke_sweep(params, 
@@ -287,4 +305,20 @@ plt.title("Region of Attraction vs. Number of Spokes")
 plt.grid(True, linestyle=":", alpha=0.6)
 plt.legend()
 plt.tight_layout()
+plt.show()
+
+# Plot RoA phase portraits for the smallest and largest spoke counts
+fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+for ax, spoke_value in zip(axes, spoke_roa_values):
+    angle_values, angular_velocity_values, roa_grid = roa_spoke_results[spoke_value]
+    angle_matrix, angular_velocity_matrix = np.meshgrid(angle_values, angular_velocity_values)
+    ax.contourf(angle_matrix, angular_velocity_matrix, roa_grid,
+                levels=[-0.5, 0.5, 1.5, 2.5], cmap=roa_cmap)
+    ax.set_xlabel(r"Initial angle $\theta_0$ (rad)")
+    ax.set_title(f"N = {spoke_value}")
+    ax.grid(True, linestyle=":", alpha=0.4)
+axes[0].set_ylabel(r"Initial angular velocity $\dot{\theta}_0$ (rad/s)")
+fig.suptitle("Regions of Attraction: Smallest vs. Largest Spoke Count")
+fig.legend(handles=legend_elements, loc="lower center", ncol=4)
+plt.tight_layout(rect=[0, 0.05, 1, 0.95])
 plt.show()
